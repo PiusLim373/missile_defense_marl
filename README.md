@@ -21,6 +21,7 @@ This will create a conda environment me5424-missile-defense-marl with necessary 
 python training_agent.py
 ```
 :warning: User can opt to render the pygame visualizer during training, but the training time will be significantly slower
+
 ![](/docs/pygame_visualizer.png)
 
 After the training completed, a `PPO_<date>` will be saved to the `models/` directory. The `models/PPO_<date>/checkpoint_000xxx/` is the actual model that can be loaded.
@@ -30,3 +31,5 @@ After the training completed, a `PPO_<date>` will be saved to the `models/` dire
 python testing_agent.py
 ```
 A sample model is provided, feel free to change it.
+
+![](/docs/sample_trained_agent_playouts.mp4)
