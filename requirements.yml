@@ -1,0 +1,11 @@
+name: me5424-missile-defense-marl
+channels:
+  - defaults
+dependencies:
+  - python=3.8
+  - pip:
+    - gymnasium
+    - numpy
+    - torch
+    - pygame
+    - ray[rllib,tune,serve]
