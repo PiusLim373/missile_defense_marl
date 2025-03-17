@@ -5,7 +5,7 @@ from missile_defense_gym import *
 import os
 
 # Register the custom environment
-env_name = "simple_multi_agent_env"
+env_name = "missile_defense_env"
 register_env(env_name, lambda config: MissileDefenseEnv(config, render=False))
 
 # Define the checkpoint path (update this to your actual checkpoint location)

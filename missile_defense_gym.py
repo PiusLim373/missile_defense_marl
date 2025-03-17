@@ -44,6 +44,7 @@ class MissileDefenseEnv(MultiAgentEnv):
                 self.base_png = pygame.image.load("./pygame_asset/base.png").convert_alpha()
                 self.missile_png = pygame.image.load("./pygame_asset/missile.png").convert_alpha()
                 self.drone_png = pygame.image.load("./pygame_asset/drone.png").convert_alpha()
+                self.background_png = pygame.image.load("./pygame_asset/background.png").convert_alpha()
             pygame.display.set_caption("Missile Defense System")
             self.clock = pygame.time.Clock()
         self.agents = [f"drone_{i}" for i in range(NUM_DRONES)]
@@ -164,6 +165,8 @@ class MissileDefenseEnv(MultiAgentEnv):
         """
         self.screen.fill(WHITE)
         if self.realistic_render:
+            background_rect = self.background_png.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+            self.screen.blit(self.background_png, background_rect)
             base_rect = self.base_png.get_rect(center=self.base_pos)
             self.screen.blit(self.base_png, base_rect)
             missile_direction = self.missile_velocity
