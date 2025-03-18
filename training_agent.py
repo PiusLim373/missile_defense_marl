@@ -10,14 +10,14 @@ checkpoint_path = os.path.join(cwd, "models")
 
 # Register the custom environment
 env_name = "missile_defense_env"
-register_env(env_name, lambda config: MissileDefenseEnv(config, render=False))
+register_env(env_name, lambda config: MissileDefenseEnv(config, render=False, realistic_render=False))
 
 
 # Configure MAPPO with shared policies
 config = (
     PPOConfig()
     .environment(env=env_name)
-    .rollouts(num_rollout_workers=1)
+    .rollouts(num_rollout_workers=8)
     .training(
         lr=5e-4,  # Learning rate
         gamma=0.99,  # Discount factor
@@ -44,10 +44,10 @@ tune.Tuner(
     "PPO",
     param_space=config.to_dict(),
     run_config=air.RunConfig(
-        stop={"episodes_total": 2000},
+        stop={"training_iteration": 3001},
         storage_path=checkpoint_path,  # Specify the custom save directory
         checkpoint_config=air.CheckpointConfig(
-            checkpoint_frequency=3,  # Save a checkpoint every 10 training iterations
+            checkpoint_frequency=50,  # Save a checkpoint every 10 training iterations
             checkpoint_at_end=True,   # Also save at the end of training
         ),
     ),
