@@ -3,18 +3,22 @@ from ray.rllib.env.multi_agent_env import MultiAgentEnv
 import numpy as np
 import gymnasium as gym
 import pygame
+import random
 
+np.set_printoptions(suppress=True)  # Disable scientific notation
+np.set_printoptions(precision=3)
 # Constants
 SCREEN_WIDTH = 1000
 SCREEN_HEIGHT = 1000
 BASE_SIZE = 50
 MISSILE_SIZE = 10
 MAX_ACCELERATION = 0.02
-MAX_SPEED = 2
+MAX_SPEED = 0.5
 DRONE_RADIUS = 300
 DRONE_SIZE = 20
 NUM_DRONES = 3
 NUM_MISSILES = 3
+CURRENT_MISSILE = 1
 # Colors
 WHITE = (255, 255, 255)
 RED = (255, 0, 0)
@@ -22,14 +26,14 @@ BLUE = (0, 0, 255)
 GREEN = (0, 255, 0)
 
 # Rewards
-BASE_HIT_REWARD = -50
-DRONE_HIT_REWARD = 100.0
-STEP_PENALTY = -0.01
-OUT_OF_BOUND_REWARD = -100
+BASE_HIT_REWARD = -15
+DRONE_HIT_REWARD = 20.0
+STEP_PENALTY = 0.0
+OUT_OF_BOUND_REWARD = -10
 CLOSER_TO_MISSILE_REWARD = 0.0
 
 OBSERVATION_SPACE = gym.spaces.Box(
-    low=np.array([-10, -10, -1.1, -1.1, 0, -1.1, -1.1, 0, -1.1, -1.1, 0]),
+    low=np.array([-10, -10, -1.1, -1.1, -1, -1.1, -1.1, -1, -1.1, -1.1, -1]),
     high=np.array(
         [
             SCREEN_WIDTH + 10,
@@ -69,14 +73,57 @@ class MissileDefenseEnv(MultiAgentEnv):
         self.base_pos = np.array([SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2])
         self.observation_space = OBSERVATION_SPACE
         self.action_space = ACTION_SPACE
+        self.level = 0
+        self.selected_level = 0
+        self.experiences = {
+            0: {"level_up_threshold": 200, "solved_counter": 0},  # 1 missiles with speed cap
+            1: {"level_up_threshold": 200, "solved_counter": 0},  # 2 missiles with speed cap
+            2: {"level_up_threshold": 200, "solved_counter": 0},  # 3 missiles with speed cap
+            3: {"level_up_threshold": 0, "solved_counter": 0},  # 3 missiles without speed cap
+        }
 
     def reset(self, seed=None, options=None):
+        global CURRENT_MISSILE, MAX_SPEED
         print("******reset*******")
+        print(f"Level: {self.level}, experience: {self.experiences}")
         self.agents = [f"drone_{i}" for i in range(NUM_DRONES)]
 
+        # check should level up:
+        # if (
+        #     self.level != 3
+        #     and self.experiences[self.level]["solved_counter"] >= self.experiences[self.level]["level_up_threshold"]
+        # ):
+        #     self.level += 1
+        #     print(f"Level up to {self.level}")
+
+        self.selected_level = self.level
+        if random.random() > 0.8:
+            self.selected_level = random.randint(0, self.level)
+        print(f"Selected level: {self.selected_level}")
+
+        if self.selected_level == 0:
+            CURRENT_MISSILE = 1
+            MAX_SPEED = 0.5
+        elif self.selected_level == 1:
+            CURRENT_MISSILE = 2
+            MAX_SPEED = 1.5
+        elif self.selected_level == 2:
+            CURRENT_MISSILE = 3
+            MAX_SPEED = 2
+        elif self.selected_level == 3:
+            CURRENT_MISSILE = 3
+            MAX_SPEED = 999
+        
         # Initialize missile
         self.missiles_data = {}
         for missile_id in range(NUM_MISSILES):
+            self.missiles_data[f"missile_{missile_id}"] = {
+                "missile_pos": np.array([-1, -1], dtype=np.float32),
+                "missile_velocity": np.zeros(2, dtype=np.float32),
+                "missile_acceleration": np.random.uniform(0, MAX_ACCELERATION),
+                "neutralized": True,
+            }
+        for missile_id in range(CURRENT_MISSILE):
             if np.random.rand() > 0.5:
                 x = np.random.choice([-MISSILE_SIZE, SCREEN_WIDTH + MISSILE_SIZE])
                 y = np.random.uniform(0, SCREEN_HEIGHT)
@@ -115,9 +162,12 @@ class MissileDefenseEnv(MultiAgentEnv):
             distance = np.linalg.norm(direction)
             if distance > 0:
                 direction /= distance  # Normalize direction vector
+                # prev_velocity = missile_velocity
                 missile_velocity += direction * missile_acceleration
-            # Calculate the speed after applying the acceleration
-            speed = np.linalg.norm(missile_velocity)
+                speed = np.linalg.norm(missile_velocity)
+                if speed > MAX_SPEED:
+                    # missile_velocity = prev_velocity
+                    missile_velocity = missile_velocity / speed * MAX_SPEED
             # Update missile position based on its velocity
             missile_pos += missile_velocity
             self.missiles_data[missile_id]["missile_pos"] = missile_pos
@@ -168,8 +218,14 @@ class MissileDefenseEnv(MultiAgentEnv):
                 self.drones_dist[agent] = min_dist_to_missile
                 rewards[agent] += CLOSER_TO_MISSILE_REWARD
 
+        remaining_missiles = sum([1 for missile_data in self.missiles_data.values() if not missile_data["neutralized"]])
+        if remaining_missiles == 0:
+            print("All missiles neutralized, terminate")
+            self.experiences[self.selected_level]["solved_counter"] += 1
+            dones["__all__"] = True
+
         if len(self.agents) == 0:
-            print("All drones went out of bound, terminate")
+            print("Not more agent left, terminate")
             dones["__all__"] = True
 
         # update the observations, dont include the drones that went out of bound, else the training will crash
@@ -188,7 +244,7 @@ class MissileDefenseEnv(MultiAgentEnv):
         obs = [self.drones_pos[agent][0], self.drones_pos[agent][1]]
         for missile_id, missile_data in self.missiles_data.items():
             if missile_data["neutralized"]:
-                obs.extend([0, 0, 0])
+                obs.extend([0, 0, -1])
             else:
                 missile_pos = missile_data["missile_pos"]
                 direction = missile_pos - self.drones_pos[agent]
@@ -233,7 +289,7 @@ class MissileDefenseEnv(MultiAgentEnv):
                 pygame.draw.circle(self.screen, GREEN, drone_pos.astype(int), DRONE_SIZE)
         pygame.display.flip()
         # the higher the number, the faster the simulation
-        self.clock.tick(600)
+        self.clock.tick(1000)
 
     def close(self):
         if self.render_flag:
@@ -244,10 +300,13 @@ if __name__ == "__main__":
     env = MissileDefenseEnv(render=True, realistic_render=True)
     obs = env.reset()
     done = False
-    actions = {"drone_0": np.array([0.1, 0.1]), "drone_1": np.array([-0.1, -0.1]), "drone_2": np.array([0.0, 0.0])}
-    obs, rewards, terminateds, truncateds, infos = env.step(actions)
+    # actions = {"drone_0": np.array([0.1, 0.1]), "drone_1": np.array([-0.1, -0.1]), "drone_2": np.array([0.0, 0.0])}
+    # obs, rewards, terminateds, truncateds, infos = env.step(actions)
     while not done:
-        actions = {"drone_0": np.array([0.1, 0.1]), "drone_1": np.array([-0.1, -0.1]), "drone_2": np.array([0.0, 0.0])}
+        # actions = {"drone_0": np.array([0.1, 0.1]), "drone_1": np.array([-0.1, -0.1]), "drone_2": np.array([0.0, 0.0])}
+        actions = {"drone_0": np.array([0.0, 0.0]), "drone_1": np.array([-0.0, -0.0]), "drone_2": np.array([0.0, 0.0])}
         obs, rewards, dones, truncateds, infos = env.step(actions)
         done = dones["__all__"]
+        print(obs)
+        # input("enter")
     env.close()
