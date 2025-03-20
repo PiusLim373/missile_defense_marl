@@ -27,31 +27,39 @@ GREEN = (0, 255, 0)
 
 # Rewards
 BASE_HIT_REWARD = -15
-DRONE_HIT_REWARD = 20.0
+DRONE_HIT_REWARD = 40.0
 STEP_PENALTY = 0.0
 OUT_OF_BOUND_REWARD = -10
-CLOSER_TO_MISSILE_REWARD = 0.0
+CLOSER_TO_MISSILE_REWARD = 0
 
 OBSERVATION_SPACE = gym.spaces.Box(
-    low=np.array([-10, -10, -1.1, -1.1, -1, -1.1, -1.1, -1, -1.1, -1.1, -1]),
+    low=np.array([-10, -10, -1, -1, -1.1, -1.1, -1, -1, -1, -1.1, -1.1, -1, -1, -1, -1.1, -1.1, -1], dtype=np.float32),
     high=np.array(
         [
             SCREEN_WIDTH + 10,
             SCREEN_HEIGHT + 10,
+            1000,
+            1000,
             1.1,
             1.1,
             1500,
+            1000,
+            1000,
             1.1,
             1.1,
             1500,
+            1000,
+            1000,
             1.1,
             1.1,
             1500,
-        ]
+        ],
+        dtype=np.float32,
     ),
+    shape=(17,),
     dtype=np.float32,
 )
-ACTION_SPACE = gym.spaces.Box(low=-5.0, high=5.0, shape=(2,))
+ACTION_SPACE = gym.spaces.Box(low=-5.0, high=5.0, shape=(2,), dtype=np.int16)
 
 
 class MissileDefenseEnv(MultiAgentEnv):
@@ -76,25 +84,25 @@ class MissileDefenseEnv(MultiAgentEnv):
         self.level = 0
         self.selected_level = 0
         self.experiences = {
-            0: {"level_up_threshold": 200, "solved_counter": 0},  # 1 missiles with speed cap
-            1: {"level_up_threshold": 200, "solved_counter": 0},  # 2 missiles with speed cap
-            2: {"level_up_threshold": 200, "solved_counter": 0},  # 3 missiles with speed cap
+            0: {"level_up_threshold": 1500, "solved_counter": 0},  # 1 missiles with speed cap
+            1: {"level_up_threshold": 1500, "solved_counter": 0},  # 2 missiles with speed cap
+            2: {"level_up_threshold": 1500, "solved_counter": 0},  # 3 missiles with speed cap
             3: {"level_up_threshold": 0, "solved_counter": 0},  # 3 missiles without speed cap
         }
 
     def reset(self, seed=None, options=None):
-        global CURRENT_MISSILE, MAX_SPEED
+        global CURRENT_MISSILE, MAX_SPEED, MAX_ACCELERATION
         print("******reset*******")
         print(f"Level: {self.level}, experience: {self.experiences}")
         self.agents = [f"drone_{i}" for i in range(NUM_DRONES)]
 
         # check should level up:
-        # if (
-        #     self.level != 3
-        #     and self.experiences[self.level]["solved_counter"] >= self.experiences[self.level]["level_up_threshold"]
-        # ):
-        #     self.level += 1
-        #     print(f"Level up to {self.level}")
+        if (
+            self.level != 3
+            and self.experiences[self.level]["solved_counter"] >= self.experiences[self.level]["level_up_threshold"]
+        ):
+            self.level += 1
+            print(f"Level up to {self.level}")
 
         self.selected_level = self.level
         if random.random() > 0.8:
@@ -106,33 +114,41 @@ class MissileDefenseEnv(MultiAgentEnv):
             MAX_SPEED = 0.5
         elif self.selected_level == 1:
             CURRENT_MISSILE = 2
-            MAX_SPEED = 1.5
+            MAX_SPEED = 0.1
+            MAX_ACCELERATION = 0.01
         elif self.selected_level == 2:
-            CURRENT_MISSILE = 3
-            MAX_SPEED = 2
+            CURRENT_MISSILE = 2
+            MAX_SPEED = 0.5
+            MAX_ACCELERATION = 0.02
         elif self.selected_level == 3:
-            CURRENT_MISSILE = 3
-            MAX_SPEED = 999
-        
+            CURRENT_MISSILE = 2
+            MAX_SPEED = 1.0
+            MAX_ACCELERATION = 0.02
+
         # Initialize missile
-        self.missiles_data = {}
-        for missile_id in range(NUM_MISSILES):
-            self.missiles_data[f"missile_{missile_id}"] = {
+        self.missiles_data = {
+            f"missile_{missile_id}": {
                 "missile_pos": np.array([-1, -1], dtype=np.float32),
                 "missile_velocity": np.zeros(2, dtype=np.float32),
                 "missile_acceleration": np.random.uniform(0, MAX_ACCELERATION),
                 "neutralized": True,
             }
-        for missile_id in range(CURRENT_MISSILE):
+            for missile_id in range(NUM_MISSILES)
+        }
+
+        # Randomly select `CURRENT_MISSILE` missiles to be active
+        active_missiles = random.sample(list(self.missiles_data.keys()), CURRENT_MISSILE)
+
+        for missile_id in active_missiles:
             if np.random.rand() > 0.5:
-                x = np.random.choice([-MISSILE_SIZE, SCREEN_WIDTH + MISSILE_SIZE])
+                x = np.random.choice([0, SCREEN_WIDTH])
                 y = np.random.uniform(0, SCREEN_HEIGHT)
             else:
                 x = np.random.uniform(0, SCREEN_WIDTH)
-                y = np.random.choice([-MISSILE_SIZE, SCREEN_HEIGHT + MISSILE_SIZE])
+                y = np.random.choice([0, SCREEN_HEIGHT])
 
-            # Store missile data in the dictionary
-            self.missiles_data[f"missile_{missile_id}"] = {
+            # Activate the missile
+            self.missiles_data[missile_id] = {
                 "missile_pos": np.array([x, y], dtype=np.float32),
                 "missile_velocity": np.zeros(2, dtype=np.float32),
                 "missile_acceleration": np.random.uniform(0, MAX_ACCELERATION),
@@ -244,7 +260,7 @@ class MissileDefenseEnv(MultiAgentEnv):
         obs = [self.drones_pos[agent][0], self.drones_pos[agent][1]]
         for missile_id, missile_data in self.missiles_data.items():
             if missile_data["neutralized"]:
-                obs.extend([0, 0, -1])
+                obs.extend([-1, -1, 0, 0, -1])
             else:
                 missile_pos = missile_data["missile_pos"]
                 direction = missile_pos - self.drones_pos[agent]
@@ -253,7 +269,7 @@ class MissileDefenseEnv(MultiAgentEnv):
                     unit_vector = direction / distance
                 else:
                     unit_vector = np.zeros(2)
-                obs.extend(unit_vector.tolist() + [float(distance)])
+                obs.extend([missile_pos[0], missile_pos[1]] + unit_vector.tolist() + [float(distance)])
         return np.array(obs)
 
     def render(self):
