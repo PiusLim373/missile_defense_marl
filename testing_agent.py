@@ -39,14 +39,5 @@ while True:
 
         observations, rewards, dones, truncateds, infos = env.step(actions)
         done = dones["__all__"]
-        # print(f"Actions: {actions}")
-        # print(f"Rewards: {rewards}")
-        # print(f"Dones: {dones}")
-        # print(len(observations))
-        # for key,value in observations.items():
-        #     print(f"{key}: {value}")
-        # for key, value in observations.items():
-        #     if value.shape[0] != 33:        #         print("error!")
-            # print(f"{key}: {value.shape}")  # or len(value) 
 
 env.close()
