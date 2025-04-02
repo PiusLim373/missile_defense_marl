@@ -39,12 +39,12 @@ config = (
     .framework("torch")
 )
 
-# Training with Tune
+# Training with Tunes
 tune.Tuner(
     "PPO",
     param_space=config.to_dict(),
     run_config=air.RunConfig(
-        stop={"training_iteration": 100000},
+        stop={"training_iteration": 1000},
         storage_path=checkpoint_path,  # Specify the custom save directory
         checkpoint_config=air.CheckpointConfig(
             checkpoint_frequency=50,  # Save a checkpoint every 10 training iterations
