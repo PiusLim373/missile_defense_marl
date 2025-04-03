@@ -5,6 +5,7 @@ import gymnasium as gym
 import pygame
 import random
 import copy
+import heapq
 from icecream import ic
 
 np.set_printoptions(suppress=True)  # Disable scientific notation
@@ -116,6 +117,7 @@ class MissileDefenseEnv(MultiAgentEnv):
         print("******reset*******")
         print(f"Level: {self.level}, experience: {self.experiences}")
         self.agents = [f"drone_{i}" for i in range(NUM_DRONES)]
+        self.missiles = [f"missile_{i}" for i in range(NUM_MISSILES)]
         # check should level up:
         if (
             self.level != 3
@@ -146,6 +148,7 @@ class MissileDefenseEnv(MultiAgentEnv):
             MAX_MISSILE_ACCELERATION = 0.02
 
         # Initialize missile
+        self.drone_assignment = {agent: None for agent in self.agents}
         self.missile_counter = 0
         self.missiles_data = {
             f"missile_{missile_id}": {
@@ -158,7 +161,6 @@ class MissileDefenseEnv(MultiAgentEnv):
             }
             for missile_id in range(NUM_MISSILES)
         }
-        self.missile_slots = [None]*NUM_MISSILES # store the missile id
         # Randomly select `CURRENT_MISSILE` missiles to be active
         active_missiles = random.sample(list(self.missiles_data.keys()), 3)
         for missile_id in active_missiles:
@@ -198,15 +200,12 @@ class MissileDefenseEnv(MultiAgentEnv):
     
 
     def _spawn_missile(self, missile_id): # FOR RESPAWN
-
         if np.random.rand() > 0.5:
             x = np.random.choice([0, SCREEN_WIDTH])
             y = np.random.uniform(0, SCREEN_HEIGHT)
         else:
             x = np.random.uniform(0, SCREEN_WIDTH)
             y = np.random.choice([0, SCREEN_HEIGHT])
-        
-
 
         self.missiles_data[missile_id] = {
             "missile_pos": np.array([x, y], dtype=np.float32),
@@ -218,13 +217,6 @@ class MissileDefenseEnv(MultiAgentEnv):
 
         assert not self.missiles_data[missile_id]["neutralized"], f"Missile {missile_id} failed to respawn"
         print(f"Missile {missile_id} respawned at {self.missiles_data[missile_id]['missile_pos']}")
-    
-         
-        
-
-    
-        
-
 
     def _calculate_rewards(self):
          # Compute rewards, dones, and infos
@@ -410,7 +402,10 @@ class MissileDefenseEnv(MultiAgentEnv):
         if self.agents:  # Only if there are agents remaining
             avg_dv = np.mean([np.linalg.norm(self.drones_vel[a] - self.prev_drones_vel[a]) for a in self.agents])
             avg_da = np.mean([np.linalg.norm(self.drones_acc[a] - self.prev_drones_acc[a]) for a in self.agents])
-            print(f"[Smoothness] Avg Δv: {avg_dv:.2f}, Avg Δa: {avg_da:.2f}")
+            # print(f"[Smoothness] Avg Δv: {avg_dv:.2f}, Avg Δa: {avg_da:.2f}")
+
+        self._assign_missiles()
+        
         # update the observations, dont include the drones that went out of bound, else the training will crash
         observations = {agent: self._get_obs(agent) for agent in self.agents}
         infos = {agent: {} for agent in self.agents}
@@ -435,17 +430,44 @@ class MissileDefenseEnv(MultiAgentEnv):
         global MAX_MISSILE_SPEED, MAX_MISSILE_ACCELERATION 
         if self.level >= 3:
             return
-
-           
-        
         MAX_MISSILE_ACCELERATION  *= 1.1
         MAX_MISSILE_SPEED *= 1.2
         self.MISSILE_COOLDOWN = max(0, self.MISSILE_COOLDOWN - 10)  # Decrease cooldown
 
+    def _assign_missiles(self):
+        agent_missile_distances = {agent: {missile_id: None for missile_id in self.missiles_data.keys()} for agent in self.agents}
+        for missile_id, missile_data in self.missiles_data.items():
+            for agent in self.agents:
+                if missile_data["neutralized"]:
+                    agent_missile_distances[agent][missile_id] = None
+                else:
+                    agent_missile_distances[agent][missile_id] = np.linalg.norm(self.drones_pos[agent] - missile_data["missile_pos"])
 
+        assigned_drones = {}  # Stores the assigned missile for each drone
+        assigned_missiles = set()  # Set of already assigned missiles
+        # Min-heap for distance-based priority queue
+        distance_heap = []
+        # Populate heap with (distance, agent, missile) tuples
+        for agent, missile_distances in agent_missile_distances.items():
+            for missile, distance in missile_distances.items():
+                if distance is not None:  # Ignore neutralized missiles
+                    heapq.heappush(distance_heap, (distance, agent, missile))
 
+        # Assign missiles to drones based on shortest distance
+        while distance_heap:
+            distance, agent, missile = heapq.heappop(distance_heap)
+            if agent not in assigned_drones and missile not in assigned_missiles:
+                assigned_drones[agent] = missile  # Assign missile to drone
+                assigned_missiles.add(missile)  # Mark missile as assigned
 
-
+        # If a drone has no missile assigned, set it to None
+        for agent in agent_missile_distances.keys():
+            if agent not in assigned_drones:
+                assigned_drones[agent] = None
+        if self.drone_assignment != assigned_drones:
+            self.drone_assignment = assigned_drones
+            print(f"Reassigned missiles {self.drone_assignment}")
+        
     def _get_obs(self, agent):
         obs = [self.drones_pos[agent][0], self.drones_pos[agent][1]]
         obs.extend(self.drones_vel[agent].tolist())   # vx, vy
@@ -461,32 +483,17 @@ class MissileDefenseEnv(MultiAgentEnv):
         #     obs.extend(other_velocity.tolist())   # Other agent velocity: [vx, vy]
         #     obs.extend(other_acceleration.tolist())  # Other agent acceleration: [ax, ay]
 
-        # Compute distances and store them with missile data
-        missile_list = []
-        distance_to_agent = None
-        for missile_id, missile_data in self.missiles_data.items():
-            if missile_data["neutralized"]:
-                missile_list.append((float('inf'), None, [-1, -1, 0, 0, -1, 999]))  # Neutralized missiles are treated as far away
-            else:
-                missile_pos = missile_data["missile_pos"]
-                direction = missile_pos - self.drones_pos[agent]
-                distance_to_agent = np.linalg.norm(direction)
-                unit_vector = direction / distance_to_agent if distance_to_agent > 0 else np.zeros(2)
-                missile_to_base_dist = np.linalg.norm(missile_pos - self.base_pos)  
-                missile_list.append((
-                    distance_to_agent,
-                    missile_id,
-                    [missile_pos[0], missile_pos[1]] + unit_vector.tolist() + [distance_to_agent, missile_to_base_dist]
-                ))
-
-        # Sort by distance (smallest first)
-        missile_list.sort(key=lambda x: x[0])
-        obs.extend(missile_list[0][2])
-
-        # Assign nearest missile to current agent
-        if missile_list[0][1] != self.drone_target_ids[agent]:
-            print(f"Assigned {missile_list[0][1]} to {agent}")
-            self.drone_target_ids[agent] = missile_list[0][1]
+        # Provide data of assigned missile to agent
+        if self.drone_assignment[agent] is not None:
+            missile_data = self.missiles_data[self.drone_assignment[agent]]
+            missile_pos = missile_data["missile_pos"]
+            direction = missile_pos - self.drones_pos[agent]
+            distance_to_agent = np.linalg.norm(direction)
+            unit_vector = direction / distance_to_agent if distance_to_agent > 0 else np.zeros(2)
+            missile_to_base_dist = np.linalg.norm(missile_pos - self.base_pos)
+            obs.extend([missile_pos[0], missile_pos[1]] + unit_vector.tolist() + [distance_to_agent, missile_to_base_dist])
+        else:
+            obs.extend([-1, -1, 0, 0, -1, 999])
 
         return np.array(obs)
 
@@ -523,7 +530,7 @@ class MissileDefenseEnv(MultiAgentEnv):
                 pygame.draw.circle(self.screen, GREEN, drone_pos.astype(int), DRONE_SIZE)
         pygame.display.flip()
         # the higher the number, the faster the simulation
-        self.clock.tick(1000)
+        self.clock.tick(30)
 
     def close(self):
         if self.render_flag:
