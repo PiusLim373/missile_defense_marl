@@ -16,8 +16,8 @@ SCREEN_WIDTH = 1000
 SCREEN_HEIGHT = 1000
 BASE_SIZE = 50
 MISSILE_SIZE = 10
-MAX_MISSILE_ACCELERATION = 0.1
-MAX_MISSILE_SPEED = 5.0
+MAX_MISSILE_ACCELERATION = 0.02
+MAX_MISSILE_SPEED = 2.0
 NUM_MISSILES = 3
 CURRENT_MISSILE = 1
 MAX_DRONE_VX = SCREEN_WIDTH / TIME_STEP
@@ -54,7 +54,7 @@ DRONE_HIT_REWARD = 200.0
 STEP_PENALTY = 0.0
 OUT_OF_BOUND_REWARD = -100
 NEAR_BOUND_PENALTY = -5
-BOUND_RADIUS = min(SCREEN_HEIGHT, SCREEN_WIDTH) - DRONE_SIZE*2
+BOUND_RADIUS = (min(SCREEN_HEIGHT, SCREEN_WIDTH) - DRONE_SIZE*2)/2
 BOUNDARY_MARGIN_MULTIPLIER = 5.0
 CLOSER_TO_MISSILE_REWARD = 0
 APPROACH_VEL_REWARD = 5.0
@@ -93,8 +93,8 @@ class MissileDefenseEnv(MultiAgentEnv):
         self.base_pos = np.array([SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2])
         self.observation_space = OBSERVATION_SPACE
         self.action_space = ACTION_SPACE
-        self.level = 3
-        self.selected_level = 3
+        self.level = test_level
+        self.selected_level = test_level
         self.experiences = {
             0: {"level_up_threshold": 200, "solved_counter": 0},  # 1 missiles with speed cap
             1: {"level_up_threshold": 200, "solved_counter": 0},  # 2 missiles with speed cap
