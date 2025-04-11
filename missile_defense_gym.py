@@ -386,6 +386,8 @@ class MissileDefenseEnv(MultiAgentEnv):
             self.prev_drones_pos[agent] = np.copy(self.drones_pos[agent])
             self.prev_drones_vel[agent] = np.copy(self.drones_vel[agent])
             self.prev_drones_acc[agent] = np.copy(self.drones_acc[agent])
+            
+        # Update drones positions and velocities
         for agent, action in actions.items():
             if agent in self.drones_pos:
                 desired_v = np.clip(action, -MAX_VELOCITY, MAX_VELOCITY)
@@ -393,14 +395,12 @@ class MissileDefenseEnv(MultiAgentEnv):
                 max_delta_v = MAX_ACCELERATION * TIME_STEP
                 if np.linalg.norm(delta_v) > max_delta_v:
                     delta_v = delta_v / np.linalg.norm(delta_v) * max_delta_v
-
                 self.drones_vel[agent] += delta_v
         for agent in self.agents:
             self.drones_pos[agent] += self.drones_vel[agent] * TIME_STEP
 
-        # Now update velocity and acceleration
+        # Update acceleration
         for agent in self.agents:
-            # self.drones_vel[agent] = (self.drones_pos[agent] - self.prev_drones_pos[agent]) / TIME_STEP
             self.drones_acc[agent] = (self.drones_vel[agent] - self.prev_drones_vel[agent]) / TIME_STEP
 
         rewards, dones = self._calculate_rewards()
