@@ -388,7 +388,6 @@ class MissileDefenseEnv(MultiAgentEnv):
             self.prev_drones_acc[agent] = np.copy(self.drones_acc[agent])
         for agent, action in actions.items():
             if agent in self.drones_pos:
-                # self.drones_pos[agent] += action
                 desired_v = np.clip(action, -MAX_VELOCITY, MAX_VELOCITY)
                 delta_v = desired_v - self.drones_vel[agent]
                 max_delta_v = MAX_ACCELERATION * TIME_STEP
