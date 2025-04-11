@@ -6,19 +6,24 @@ import pygame
 import random
 import copy
 import heapq
-from icecream import ic
-
 np.set_printoptions(suppress=True)  # Disable scientific notation
 np.set_printoptions(precision=3, linewidth=200)
+
+# Number of agents
+NUM_DRONES = 3
+NUM_MISSILES = 3
+
+# Missile parameters
+MAX_MISSILE_ACCELERATION = 0.2
+MAX_MISSILE_SPEED = 3.0
+MISSILE_COOLDOWN = 10
+
 # Constants
 TIME_STEP = 1
 SCREEN_WIDTH = 1000
 SCREEN_HEIGHT = 1000
 BASE_SIZE = 50
 MISSILE_SIZE = 10
-MAX_MISSILE_ACCELERATION = 0.02
-MAX_MISSILE_SPEED = 2.0
-NUM_MISSILES = 3
 CURRENT_MISSILE = 1
 MAX_DRONE_VX = SCREEN_WIDTH / TIME_STEP
 MAX_DRONE_VY = SCREEN_HEIGHT / TIME_STEP
@@ -26,7 +31,6 @@ MAX_DRONE_AX = MAX_DRONE_VX / TIME_STEP
 MAX_DRONE_AY = MAX_DRONE_VY / TIME_STEP
 DRONE_RADIUS = 300
 DRONE_SIZE = 20
-NUM_DRONES = 3
 VELOCITY_THRESHOLD = 0
 ACCELERATION_THRESHOLD = 0
 VELOCITY_CHANGE_PENALTY_WEIGHT = -0.2
@@ -35,7 +39,6 @@ SMOOTHNESS_DISTANCE_THRESHOLD = 20
 MAX_VELOCITY = 5.0
 MAX_ACCELERATION = 1.0
 RETARGET_DISTANCE = 200
-# MISSILE_COOLDOWN = 100
 
 # Observation size
 OBSERVATION_PER_DRONE = 6
@@ -54,20 +57,30 @@ DRONE_HIT_REWARD = 200.0
 STEP_PENALTY = 0.0
 OUT_OF_BOUND_REWARD = -100
 NEAR_BOUND_PENALTY = -5
-BOUND_RADIUS = (min(SCREEN_HEIGHT, SCREEN_WIDTH) - DRONE_SIZE*2)/2
+BOUND_RADIUS = (min(SCREEN_HEIGHT, SCREEN_WIDTH) - DRONE_SIZE * 2) / 2
 BOUNDARY_MARGIN_MULTIPLIER = 5.0
 CLOSER_TO_MISSILE_REWARD = 0
 APPROACH_VEL_REWARD = 5.0
 APPROACH_ACC_REWARD = 5.0
 
 OBSERVATION_SPACE = gym.spaces.Box(
-    low=np.array([*([-10, -10, -MAX_DRONE_VX, -MAX_DRONE_VY, -MAX_DRONE_AX, -MAX_DRONE_AY] * 1), # agent states
-                  *([-1, -1, -1.1, -1.1, -1, -10]*1)], # missile states
-                  dtype=np.float32),
-    high=np.array([*([SCREEN_WIDTH+10, SCREEN_HEIGHT+10, MAX_DRONE_VX, MAX_DRONE_VY, MAX_DRONE_AX, MAX_DRONE_AY] * 1), # agent states
-                   *([1000, 1000, 1.1, 1.1, 1500, np.linalg.norm([SCREEN_WIDTH+10, SCREEN_HEIGHT+10])] * 1)], # missile states
-                   dtype=np.float32,),
-    shape=(OBSERVATION_PER_DRONE*1 + OBSERVATION_PER_MISSILE*1,),
+    low=np.array(
+        [
+            *([-10, -10, -MAX_DRONE_VX, -MAX_DRONE_VY, -MAX_DRONE_AX, -MAX_DRONE_AY] * 1),  # agent states
+            *([-1, -1, -1.1, -1.1, -1, -10] * 1),
+        ],  # missile states
+        dtype=np.float32,
+    ),
+    high=np.array(
+        [
+            *(
+                [SCREEN_WIDTH + 10, SCREEN_HEIGHT + 10, MAX_DRONE_VX, MAX_DRONE_VY, MAX_DRONE_AX, MAX_DRONE_AY] * 1
+            ),  # agent states
+            *([1000, 1000, 1.1, 1.1, 1500, np.linalg.norm([SCREEN_WIDTH + 10, SCREEN_HEIGHT + 10])] * 1),
+        ],  # missile states
+        dtype=np.float32,
+    ),
+    shape=(OBSERVATION_PER_DRONE * 1 + OBSERVATION_PER_MISSILE * 1,),
     dtype=np.float32,
 )
 ACTION_SPACE = gym.spaces.Box(low=-MAX_VELOCITY, high=MAX_VELOCITY, shape=(2,), dtype=np.int16)
@@ -77,7 +90,6 @@ class MissileDefenseEnv(MultiAgentEnv):
     def __init__(self, config=None, test_level=0, render=False, realistic_render=False):
         self.render_flag = render
         self.realistic_render = realistic_render
-        self.dt = 1 # assuming every step forward is time unit of 1
         if self.render_flag:
             pygame.init()
             self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -101,17 +113,15 @@ class MissileDefenseEnv(MultiAgentEnv):
             2: {"level_up_threshold": 200, "solved_counter": 0},  # 3 missiles with speed cap
             3: {"level_up_threshold": 0, "solved_counter": 0},  # 3 missiles without speed cap
         }
-        self.MISSILE_COOLDOWN = 10 
-        self.MAX_MISSILE_SPEED = 1.0  # Change this to a global variable if needed
         self.step_counter = 0
         self.level = 0
-        self.missiles_intercepted  = 0
-        self.survival_time = 0  
+        self.missiles_intercepted = 0
+        self.survival_time = 0
         self.LEVEL_UP_THRESHOLD = {
-            0 : {"interceptions_needed": 1, "survival_steps": 4000},
-            1 : {"interceptions_needed": 2, "survival_steps": 8000},
-            2 : {"interceptions_needed": 3, "survival_steps": 12000},
-            3 : None
+            0: {"interceptions_needed": 1, "survival_steps": 4000},
+            1: {"interceptions_needed": 2, "survival_steps": 8000},
+            2: {"interceptions_needed": 3, "survival_steps": 12000},
+            3: None,
         }
 
     def reset(self, seed=None, options=None):
@@ -161,7 +171,7 @@ class MissileDefenseEnv(MultiAgentEnv):
                 "missile_velocity": np.zeros(2, dtype=np.float32),
                 "missile_acceleration": np.random.uniform(0, MAX_MISSILE_ACCELERATION),
                 "neutralized": True,
-                "cooldown": 0 # Cooldown for missile
+                "cooldown": 0,  # Cooldown for missile
             }
             for missile_id in range(NUM_MISSILES)
         }
@@ -197,9 +207,8 @@ class MissileDefenseEnv(MultiAgentEnv):
         self.prev_drones_acc = copy.copy(self.drones_acc)
         observations = {agent: self._get_obs(agent) for agent in self.agents}
         return observations, {}
-    
 
-    def _spawn_missile(self, missile_id): # FOR RESPAWN
+    def _spawn_missile(self, missile_id):  # FOR RESPAWN
         if np.random.rand() > 0.5:
             x = np.random.choice([0, SCREEN_WIDTH])
             y = np.random.uniform(0, SCREEN_HEIGHT)
@@ -212,14 +221,14 @@ class MissileDefenseEnv(MultiAgentEnv):
             "missile_velocity": np.zeros(2, dtype=np.float32),
             "missile_acceleration": np.random.uniform(0, MAX_MISSILE_ACCELERATION),
             "neutralized": False,
-            "cooldown": 0 # Cooldown for missile
+            "cooldown": 0,  # Cooldown for missile
         }
 
         assert not self.missiles_data[missile_id]["neutralized"], f"Missile {missile_id} failed to respawn"
         print(f"🚀 {missile_id} respawned at {self.missiles_data[missile_id]['missile_pos']}")
 
     def _calculate_rewards(self):
-         # Compute rewards, dones, and infos
+        # Compute rewards, dones, and infos
         rewards = {agent: STEP_PENALTY for agent in self.agents}
         dones = {agent: False for agent in self.agents}
         dones["__all__"] = False
@@ -254,7 +263,7 @@ class MissileDefenseEnv(MultiAgentEnv):
             for missile_id, missile_data in self.missiles_data.items():
                 if missile_data["neutralized"]:
                     continue
-                
+
                 missile_pos = missile_data["missile_pos"]
                 direction = missile_pos - agent_pos
                 distance = np.linalg.norm(direction)
@@ -274,30 +283,22 @@ class MissileDefenseEnv(MultiAgentEnv):
                 if distance < MISSILE_SIZE + DRONE_SIZE:
                     self.missiles_intercepted += 1
                     rewards[agent] += DRONE_HIT_REWARD
-                    
+
                     missile_data["neutralized"] = True
-                    missile_data["cooldown"] = self.MISSILE_COOLDOWN  # Start countdown
-                    print(f"{agent} intercepted {missile_id}, respawning in {self.MISSILE_COOLDOWN} steps")
+                    missile_data["cooldown"] = MISSILE_COOLDOWN  # Start countdown
+                    print(f"{agent} intercepted {missile_id}, respawning in {MISSILE_COOLDOWN} steps")
 
                     for assigned_agent, assignment in self.drone_assignment.items():
                         if assignment == missile_id:
                             self.drone_assignment[assigned_agent] = None
                             print(f"{assigned_agent} unassigned from {assignment}")
                             print(f"Updated assignments: {self.drone_assignment}")
-                    #dones[agent] = True
-                    #if agent in self.agents:
-                        # self.agents.remove(agent)
-    
-        remaining_missiles = sum([1 for missile_data in self.missiles_data.values() if not missile_data["neutralized"]])
-        #if remaining_missiles == 0:
-         #   print("All missiles neutralized, terminate")
-           # self.experiences[self.selected_level]["solved_counter"] += 1
-          #  dones["__all__"] = True
-        for missile_data in self.missiles_data.values():
-            if np.linalg.norm(missile_data["missile_pos"] - self.base_pos) < BASE_SIZE / 2:
-                print("Base hit, game lost and terminate")
-                dones["__all__"] = True
-                
+
+                    # Drones dont die by intercepting missiles, if needed, uncomment the following lines
+                    # dones[agent] = True
+                    # if agent in self.agents:
+                    # self.agents.remove(agent)
+
         if len(self.agents) == 0:
             print("No agent left, terminate")
             dones["__all__"] = True
@@ -310,16 +311,16 @@ class MissileDefenseEnv(MultiAgentEnv):
         current_threshold = self.LEVEL_UP_THRESHOLD[self.level]
         if self.level in self.LEVEL_UP_THRESHOLD:
             current_threshold = self.LEVEL_UP_THRESHOLD[self.level]
-        
-        if current_threshold and  (
+
+        if current_threshold and (
             self.missiles_intercepted >= current_threshold["interceptions_needed"]
             and self.survival_time >= current_threshold["survival_steps"]
-        ) :
-            #if self.missiles_intercepted >= current_threshold["interceptions_needed"] and self.survival_time >= current_threshold["survival_steps"]:
-                print("Level up!")
-                self.level += 1
-                print(f"Level up to {self.level}")
-                self._increase_difficulty()
+        ):
+            # if self.missiles_intercepted >= current_threshold["interceptions_needed"] and self.survival_time >= current_threshold["survival_steps"]:
+            print("Level up!")
+            self.level += 1
+            print(f"Level up to {self.level}")
+            self._increase_difficulty()
 
         for missile_id, missile_data in self.missiles_data.items():
             if missile_data["neutralized"]:
@@ -331,7 +332,7 @@ class MissileDefenseEnv(MultiAgentEnv):
                     respawned_missiles.append(missile_id)
         # if respawned_missiles:
         #     print(f"Respawned missiles: {respawned_missiles} at step{self.step_counter}")
-        
+
         # Update missiles positions
         for missile_id, missile_data in self.missiles_data.items():
             if missile_data["neutralized"]:
@@ -352,8 +353,10 @@ class MissileDefenseEnv(MultiAgentEnv):
                     direction /= distance  # Normalize direction vector
                     missile_velocity += direction * missile_acceleration
                     speed = np.linalg.norm(missile_velocity)
-                    if speed > self.MAX_MISSILE_SPEED:  # --> Change these instances to global to default and remove keyboard input
-                        missile_velocity = missile_velocity / speed * self.MAX_MISSILE_SPEED
+                    if (
+                        speed > MAX_MISSILE_SPEED
+                    ):  # --> Change these instances to global to default and remove keyboard input
+                        missile_velocity = missile_velocity / speed * MAX_MISSILE_SPEED
                 # Update missile position based on its velocity
                 missile_pos += missile_velocity
                 self.missiles_data[missile_id]["missile_pos"] = missile_pos
@@ -369,22 +372,22 @@ class MissileDefenseEnv(MultiAgentEnv):
                 # self.drones_pos[agent] += action
                 desired_v = np.clip(action, -MAX_VELOCITY, MAX_VELOCITY)
                 delta_v = desired_v - self.drones_vel[agent]
-                max_delta_v = MAX_ACCELERATION * self.dt
+                max_delta_v = MAX_ACCELERATION * TIME_STEP
                 if np.linalg.norm(delta_v) > max_delta_v:
                     delta_v = delta_v / np.linalg.norm(delta_v) * max_delta_v
-                
+
                 self.drones_vel[agent] += delta_v
         for agent in self.agents:
-            self.drones_pos[agent] += self.drones_vel[agent] * self.dt
+            self.drones_pos[agent] += self.drones_vel[agent] * TIME_STEP
 
         # Now update velocity and acceleration
         for agent in self.agents:
-            # self.drones_vel[agent] = (self.drones_pos[agent] - self.prev_drones_pos[agent]) / self.dt
-            self.drones_acc[agent] = (self.drones_vel[agent] - self.prev_drones_vel[agent]) / self.dt
+            # self.drones_vel[agent] = (self.drones_pos[agent] - self.prev_drones_pos[agent]) / TIME_STEP
+            self.drones_acc[agent] = (self.drones_vel[agent] - self.prev_drones_vel[agent]) / TIME_STEP
 
         rewards, dones = self._calculate_rewards()
         self._assign_missiles()
-        #Smoothness reward
+        # Smoothness reward
         for agent in self.agents:
             delta_vel = np.linalg.norm(self.drones_vel[agent] - self.prev_drones_vel[agent])
             delta_acc = np.linalg.norm(self.drones_acc[agent] - self.prev_drones_acc[agent])
@@ -404,7 +407,7 @@ class MissileDefenseEnv(MultiAgentEnv):
             if delta_acc > ACCELERATION_THRESHOLD:
                 rewards[agent] += scale * ACCELERATION_CHANGE_PENALTY_WEIGHT * (delta_acc - ACCELERATION_THRESHOLD)
 
-        #Debug log
+        # Debug log
         if self.agents:  # Only if there are agents remaining
             avg_dv = np.mean([np.linalg.norm(self.drones_vel[a] - self.prev_drones_vel[a]) for a in self.agents])
             avg_da = np.mean([np.linalg.norm(self.drones_acc[a] - self.prev_drones_acc[a]) for a in self.agents])
@@ -422,18 +425,18 @@ class MissileDefenseEnv(MultiAgentEnv):
             self.render()
         return observations, rewards, dones, truncateds, infos
 
-    def _increase_difficulty(self):   # increase the difficulty of the game as per new parameters
-        global MAX_MISSILE_SPEED, MAX_MISSILE_ACCELERATION 
+    def _increase_difficulty(self):  # increase the difficulty of the game as per new parameters
+        global MAX_MISSILE_SPEED, MAX_MISSILE_ACCELERATION, MISSILE_COOLDOWN
         if self.level >= 3:
             return
-        MAX_MISSILE_ACCELERATION  *= 1.1
+        MAX_MISSILE_ACCELERATION *= 1.1
         MAX_MISSILE_SPEED *= 1.2
-        self.MISSILE_COOLDOWN = max(0, self.MISSILE_COOLDOWN - 10)  # Decrease cooldown
+        MISSILE_COOLDOWN = max(0, MISSILE_COOLDOWN - 10)  # Decrease cooldown
 
     def _assign_missiles(self, distance_threshold=RETARGET_DISTANCE):
         """
         Assigns missiles to drones based on the following strategy:
-        
+
         1. If more than half the drones are unassigned, reassign all using a greedy heap approach.
         2. Otherwise, only assign new missiles to currently unassigned drones.
         """
@@ -444,7 +447,9 @@ class MissileDefenseEnv(MultiAgentEnv):
             if missile_data["neutralized"]:
                 continue  # Skip neutralized missiles
             for agent in self.agents:
-                agent_missile_distances[agent][missile_id] = np.linalg.norm(self.drones_pos[agent] - missile_data["missile_pos"])
+                agent_missile_distances[agent][missile_id] = np.linalg.norm(
+                    self.drones_pos[agent] - missile_data["missile_pos"]
+                )
         for agent in self.agents:
             if agent not in agent_missile_distances.keys():
                 agent_missile_distances[agent] = {}
@@ -457,21 +462,23 @@ class MissileDefenseEnv(MultiAgentEnv):
 
         # Evaluate if any assigned drone could have a significantly closer target
         for agent, current_missile in self.drone_assignment.items():
-            if current_missile is None: # Current agent has no target
-                continue 
-            current_distance = agent_missile_distances[agent].get(current_missile, float('inf'))
+            if current_missile is None:  # Current agent has no target
+                continue
+            current_distance = agent_missile_distances[agent].get(current_missile, float("inf"))
             for solution in distance_heap:
                 if solution[1] != agent or (solution[1] == agent and solution[2] == current_missile):
                     continue
                 best_distance, _, best_missile = solution
-                if abs(current_distance - best_distance)>distance_threshold:
+                if abs(current_distance - best_distance) > distance_threshold:
                     drones_with_better_options += 1
 
         # If more than half the drones are unassigned, reset and use heapq to reassign all
         unassigned_drones = {agent for agent in self.agents if self.drone_assignment.get(agent) is None}
         num_unassigned_drones = len(unassigned_drones)
-        if num_unassigned_drones > len(self.agents)/ 2 or drones_with_better_options > len(self.agents)/2:
-            print(f"More than half the drones {'are unassigned' if num_unassigned_drones > len(self.agents)/ 2 else 'has better target'}. Resetting all assignments!")
+        if num_unassigned_drones > len(self.agents) / 2 or drones_with_better_options > len(self.agents) / 2:
+            print(
+                f"More than half the drones {'are unassigned' if num_unassigned_drones > len(self.agents)/ 2 else 'has better target'}. Resetting all assignments!"
+            )
             assigned_drones = {}
             assigned_missiles = set()
             while distance_heap:
@@ -489,7 +496,9 @@ class MissileDefenseEnv(MultiAgentEnv):
             return
 
         # Otherwise, only assign unassigned drones to unassigned missiles
-        unassigned_missiles = {missile for missile in self.missiles_data if missile not in self.drone_assignment.values()}
+        unassigned_missiles = {
+            missile for missile in self.missiles_data if missile not in self.drone_assignment.values()
+        }
         if not unassigned_missiles or not unassigned_drones:
             return  # No assignments needed
 
@@ -508,7 +517,7 @@ class MissileDefenseEnv(MultiAgentEnv):
 
         if self.drone_assignment != previous_assignments:
             print(f"Updated Assignments: {self.drone_assignment}")
-        
+
         # Validate assignments
         assigned_list = list(self.drone_assignment.values())
         for missile_id in self.missiles:
@@ -518,15 +527,15 @@ class MissileDefenseEnv(MultiAgentEnv):
 
     def _get_obs(self, agent):
         obs = [self.drones_pos[agent][0], self.drones_pos[agent][1]]
-        obs.extend(self.drones_vel[agent].tolist())   # vx, vy
+        obs.extend(self.drones_vel[agent].tolist())  # vx, vy
         obs.extend(self.drones_acc[agent].tolist())  # ax, ay
         # Compute and append other drones' velocities and accelerations
         # for other_agent in self._agent_ids:
         #     if other_agent == agent:
         #         continue  # Skip self
         #     obs.extend(self.drones_pos[other_agent].tolist())
-        #     other_velocity = (self.drones_pos[other_agent] - self.prev_drones_pos[other_agent]) / self.dt
-        #     other_acceleration = (other_velocity - self.prev_drones_vel[other_agent]) / self.dt
+        #     other_velocity = (self.drones_pos[other_agent] - self.prev_drones_pos[other_agent]) / TIME_STEP
+        #     other_acceleration = (other_velocity - self.prev_drones_vel[other_agent]) / TIME_STEP
         #     obs.extend(other_velocity.tolist())   # Other agent velocity: [vx, vy]
         #     obs.extend(other_acceleration.tolist())  # Other agent acceleration: [ax, ay]
 
@@ -538,7 +547,9 @@ class MissileDefenseEnv(MultiAgentEnv):
             distance_to_agent = np.linalg.norm(direction)
             unit_vector = direction / distance_to_agent if distance_to_agent > 0 else np.zeros(2)
             missile_to_base_dist = np.linalg.norm(missile_pos - self.base_pos)
-            obs.extend([missile_pos[0], missile_pos[1]] + unit_vector.tolist() + [distance_to_agent, missile_to_base_dist])
+            obs.extend(
+                [missile_pos[0], missile_pos[1]] + unit_vector.tolist() + [distance_to_agent, missile_to_base_dist]
+            )
         else:
             obs.extend([-1, -1, 0, 0, -1, 999])
 
@@ -563,35 +574,36 @@ class MissileDefenseEnv(MultiAgentEnv):
             font = pygame.font.Font(None, 35)  # Choose a suitable font and size
 
             # Reverse the allocation dictionary to map missiles to drones
-            missile_to_drone = {v: k for k, v in self.drone_assignment.items()}  
+            missile_to_drone = {v: k for k, v in self.drone_assignment.items()}
 
             for missile_id, missile_data in self.missiles_data.items():
-                
+
                 missile_direction = missile_data["missile_velocity"]
                 angle = -np.degrees(np.arctan2(missile_direction[1], missile_direction[0]))
                 rotated_missile_img = pygame.transform.rotate(self.missile_png, angle)
                 missile_rect = rotated_missile_img.get_rect(center=missile_data["missile_pos"].astype(int))
                 self.screen.blit(rotated_missile_img, missile_rect)
-                
+
                 # Check if this missile is allocated to a drone
                 if missile_id in missile_to_drone:
                     drone_id = missile_to_drone[missile_id]  # Get the assigned drone
-                    drone_number = int(drone_id.split('_')[-1])  # Extract drone number
-                    
+                    drone_number = int(drone_id.split("_")[-1])  # Extract drone number
+
                     # Render the text near the missile
                     text_surface = font.render(f"{drone_number}", True, (0, 0, 0))  # black text
-                    text_rect = text_surface.get_rect(center=(missile_data["missile_pos"][0] + 15, 
-                                                            missile_data["missile_pos"][1] - 15))
+                    text_rect = text_surface.get_rect(
+                        center=(missile_data["missile_pos"][0] + 15, missile_data["missile_pos"][1] - 15)
+                    )
                     self.screen.blit(text_surface, text_rect)
-                    
+
             for i, drone_pos in enumerate(self.drones_pos.values()):
                 drone_rect = self.drone_png.get_rect(center=drone_pos.astype(int))
                 self.screen.blit(self.drone_png, drone_rect)
                 # Render the text (drone number) slightly offset from the drone position
                 text_surface = font.render(f"{i}", True, (0, 0, 0))  # black text
-                text_rect = text_surface.get_rect(center=(drone_pos[0] + 15, drone_pos[1] - 15))  
+                text_rect = text_surface.get_rect(center=(drone_pos[0] + 15, drone_pos[1] - 15))
                 self.screen.blit(text_surface, text_rect)
-                
+
         else:
             pygame.draw.rect(self.screen, BLUE, (*self.base_pos - BASE_SIZE // 2, BASE_SIZE, BASE_SIZE))
             for missile_data in self.missiles_data.values():
@@ -617,7 +629,11 @@ if __name__ == "__main__":
         # obs, rewards, terminateds, truncateds, infos = env.step(actions)
         while not done:
             # actions = {"drone_0": np.array([0.1, 0.1]), "drone_1": np.array([-0.1, -0.1]), "drone_2": np.array([0.0, 0.0])}
-            actions = {"drone_0": np.array([1.0, 0.0]), "drone_1": np.array([-0.0, -0.0]), "drone_2": np.array([0.0, 0.0])}
+            actions = {
+                "drone_0": np.array([1.0, 0.0]),
+                "drone_1": np.array([-0.0, -0.0]),
+                "drone_2": np.array([0.0, 0.0]),
+            }
             obs, rewards, dones, truncateds, infos = env.step(actions)
             done = dones["__all__"]
     env.close()
