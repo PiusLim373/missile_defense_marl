@@ -298,6 +298,25 @@ class MissileDefenseEnv(MultiAgentEnv):
                     # dones[agent] = True
                     # if agent in self.agents:
                     # self.agents.remove(agent)
+                    
+            # Smoothness reward
+            delta_vel = np.linalg.norm(self.drones_vel[agent] - self.prev_drones_vel[agent])
+            delta_acc = np.linalg.norm(self.drones_acc[agent] - self.prev_drones_acc[agent])
+
+            # Check distance to nearest active missile
+            min_dist_to_missile = float("inf")
+            for missile_data in self.missiles_data.values():
+                if missile_data["neutralized"]:
+                    continue
+                dist = np.linalg.norm(self.drones_pos[agent] - missile_data["missile_pos"])
+                min_dist_to_missile = min(min_dist_to_missile, dist)
+
+            scale = 0.5 if min_dist_to_missile < SMOOTHNESS_DISTANCE_THRESHOLD else 1.0
+
+            if delta_vel > VELOCITY_THRESHOLD:
+                rewards[agent] += scale * VELOCITY_CHANGE_PENALTY_WEIGHT * (delta_vel - VELOCITY_THRESHOLD)
+            if delta_acc > ACCELERATION_THRESHOLD:
+                rewards[agent] += scale * ACCELERATION_CHANGE_PENALTY_WEIGHT * (delta_acc - ACCELERATION_THRESHOLD)
 
         if len(self.agents) == 0:
             print("No agent left, terminate")
@@ -367,51 +386,25 @@ class MissileDefenseEnv(MultiAgentEnv):
             self.prev_drones_pos[agent] = np.copy(self.drones_pos[agent])
             self.prev_drones_vel[agent] = np.copy(self.drones_vel[agent])
             self.prev_drones_acc[agent] = np.copy(self.drones_acc[agent])
+            
+        # Update drones positions and velocities
         for agent, action in actions.items():
             if agent in self.drones_pos:
-                # self.drones_pos[agent] += action
                 desired_v = np.clip(action, -MAX_VELOCITY, MAX_VELOCITY)
                 delta_v = desired_v - self.drones_vel[agent]
                 max_delta_v = MAX_ACCELERATION * TIME_STEP
                 if np.linalg.norm(delta_v) > max_delta_v:
                     delta_v = delta_v / np.linalg.norm(delta_v) * max_delta_v
-
                 self.drones_vel[agent] += delta_v
         for agent in self.agents:
             self.drones_pos[agent] += self.drones_vel[agent] * TIME_STEP
 
-        # Now update velocity and acceleration
+        # Update acceleration
         for agent in self.agents:
-            # self.drones_vel[agent] = (self.drones_pos[agent] - self.prev_drones_pos[agent]) / TIME_STEP
             self.drones_acc[agent] = (self.drones_vel[agent] - self.prev_drones_vel[agent]) / TIME_STEP
 
         rewards, dones = self._calculate_rewards()
         self._assign_missiles()
-        # Smoothness reward
-        for agent in self.agents:
-            delta_vel = np.linalg.norm(self.drones_vel[agent] - self.prev_drones_vel[agent])
-            delta_acc = np.linalg.norm(self.drones_acc[agent] - self.prev_drones_acc[agent])
-
-            # Check distance to nearest active missile
-            min_dist_to_missile = float("inf")
-            for missile_data in self.missiles_data.values():
-                if missile_data["neutralized"]:
-                    continue
-                dist = np.linalg.norm(self.drones_pos[agent] - missile_data["missile_pos"])
-                min_dist_to_missile = min(min_dist_to_missile, dist)
-
-            scale = 0.5 if min_dist_to_missile < SMOOTHNESS_DISTANCE_THRESHOLD else 1.0
-
-            if delta_vel > VELOCITY_THRESHOLD:
-                rewards[agent] += scale * VELOCITY_CHANGE_PENALTY_WEIGHT * (delta_vel - VELOCITY_THRESHOLD)
-            if delta_acc > ACCELERATION_THRESHOLD:
-                rewards[agent] += scale * ACCELERATION_CHANGE_PENALTY_WEIGHT * (delta_acc - ACCELERATION_THRESHOLD)
-
-        # Debug log
-        if self.agents:  # Only if there are agents remaining
-            avg_dv = np.mean([np.linalg.norm(self.drones_vel[a] - self.prev_drones_vel[a]) for a in self.agents])
-            avg_da = np.mean([np.linalg.norm(self.drones_acc[a] - self.prev_drones_acc[a]) for a in self.agents])
-            # print(f"[Smoothness] Avg Δv: {avg_dv:.2f}, Avg Δa: {avg_da:.2f}")
 
         # update the observations, dont include the drones that went out of bound, else the training will crash
         observations = {agent: self._get_obs(agent) for agent in self.agents}
