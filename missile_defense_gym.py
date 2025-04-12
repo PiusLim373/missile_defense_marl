@@ -16,7 +16,7 @@ NUM_MISSILES = 3
 # Missile parameters
 MAX_MISSILE_ACCELERATION = 0.2
 MAX_MISSILE_SPEED = 3.0
-MISSILE_COOLDOWN = 10
+MISSILE_COOLDOWN = 50  # Cooldown for missile respawn
 
 # Constants
 TIME_STEP = 1
@@ -107,12 +107,6 @@ class MissileDefenseEnv(MultiAgentEnv):
         self.action_space = ACTION_SPACE
         self.level = test_level
         self.selected_level = test_level
-        self.experiences = {
-            0: {"level_up_threshold": 200, "solved_counter": 0},  # 1 missiles with speed cap
-            1: {"level_up_threshold": 200, "solved_counter": 0},  # 2 missiles with speed cap
-            2: {"level_up_threshold": 200, "solved_counter": 0},  # 3 missiles with speed cap
-            3: {"level_up_threshold": 0, "solved_counter": 0},  # 3 missiles without speed cap
-        }
         self.step_counter = 0
         self.level = 0
         self.missiles_intercepted = 0
@@ -129,16 +123,16 @@ class MissileDefenseEnv(MultiAgentEnv):
         self.missiles_intercepted = 0
         global CURRENT_MISSILE, MAX_MISSILE_SPEED, MAX_MISSILE_ACCELERATION
         print("******reset*******")
-        print(f"Level: {self.level}, experience: {self.experiences}")
+        print(f"Level: {self.level}")
         self.agents = [f"drone_{i}" for i in range(NUM_DRONES)]
         self.missiles = [f"missile_{i}" for i in range(NUM_MISSILES)]
-        # check should level up:
-        if (
-            self.level != 3
-            and self.experiences[self.level]["solved_counter"] >= self.experiences[self.level]["level_up_threshold"]
-        ):
-            self.level += 1
-            print(f"Level up to {self.level}")
+        # Removed experiences-based level up:
+        # if (
+        #     self.level != 3
+        #     and self.experiences[self.level]["solved_counter"] >= self.experiences[self.level]["level_up_threshold"]
+        # ):
+        #     self.level += 1
+        #     print(f"Level up to {self.level}")
 
         self.selected_level = self.level
         if random.random() > 0.8:
@@ -187,12 +181,12 @@ class MissileDefenseEnv(MultiAgentEnv):
                 y = np.random.choice([0, SCREEN_HEIGHT])
 
             # Activate the missile
-            self.missiles_data[missile_id] = {
-                "missile_pos": np.array([x, y], dtype=np.float32),
-                "missile_velocity": np.zeros(2, dtype=np.float32),
-                "missile_acceleration": np.random.uniform(0, MAX_MISSILE_ACCELERATION),
-                "neutralized": False,
-            }
+         #   self.missiles_data[missile_id] = {
+          #      "missile_pos": np.array([x, y], dtype=np.float32),
+           #     "missile_velocity": np.zeros(2, dtype=np.float32),
+            #    "missile_acceleration": np.random.uniform(0, MAX_MISSILE_ACCELERATION),
+             #   "neutralized": False,
+           # }
 
         # Initialize drones in a circle around the base
         self.drones_pos = {
@@ -341,25 +335,14 @@ class MissileDefenseEnv(MultiAgentEnv):
             print(f"Level up to {self.level}")
             self._increase_difficulty()
 
+        # Combined loop approach in step
         for missile_id, missile_data in self.missiles_data.items():
             if missile_data["neutralized"]:
-                # For neutralized missiles, update cooldown and possibly respawn.
-                if missile_data.get("cooldown", 0) > 0:
-                    missile_data["cooldown"] -= 1
-                elif missile_data.get("cooldown", 0) == 0:
-                    self._spawn_missile(missile_id)
-                    respawned_missiles.append(missile_id)
-        # if respawned_missiles:
-        #     print(f"Respawned missiles: {respawned_missiles} at step{self.step_counter}")
-
-        # Update missiles positions
-        for missile_id, missile_data in self.missiles_data.items():
-            if missile_data["neutralized"]:
-                # For neutralized missiles, update cooldown and possibly respawn.
                 if missile_data.get("cooldown", 0) > 0:
                     missile_data["cooldown"] -= 1
                 else:
                     self._spawn_missile(missile_id)
+                    respawned_missiles.append(missile_id)
             else:
                 # For active missiles update position
                 missile_pos = missile_data["missile_pos"]
@@ -369,14 +352,11 @@ class MissileDefenseEnv(MultiAgentEnv):
                 direction = self.base_pos - missile_pos
                 distance = np.linalg.norm(direction)
                 if distance > 0:
-                    direction /= distance  # Normalize direction vector
+                    direction /= distance  # Normalize vector
                     missile_velocity += direction * missile_acceleration
                     speed = np.linalg.norm(missile_velocity)
-                    if (
-                        speed > MAX_MISSILE_SPEED
-                    ):  # --> Change these instances to global to default and remove keyboard input
+                    if speed > MAX_MISSILE_SPEED:
                         missile_velocity = missile_velocity / speed * MAX_MISSILE_SPEED
-                # Update missile position based on its velocity
                 missile_pos += missile_velocity
                 self.missiles_data[missile_id]["missile_pos"] = missile_pos
                 self.missiles_data[missile_id]["missile_velocity"] = missile_velocity
@@ -629,4 +609,5 @@ if __name__ == "__main__":
             }
             obs, rewards, dones, truncateds, infos = env.step(actions)
             done = dones["__all__"]
+
     env.close()
