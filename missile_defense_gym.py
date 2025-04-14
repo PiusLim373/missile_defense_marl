@@ -68,6 +68,7 @@ BOUNDARY_MARGIN_MULTIPLIER = 5.0
 CLOSER_TO_MISSILE_REWARD = 0
 APPROACH_VEL_REWARD = 5.0
 APPROACH_ACC_REWARD = 5.0
+SOFTMAX_SCALE = 5
 
 OBSERVATION_SPACE = gym.spaces.Box(
     low=np.array(
@@ -272,7 +273,6 @@ class MissileDefenseEnv(MultiAgentEnv):
 
         # Reward for actively pursue ASSIGNED or CLOSEST missiles
         for agent, assigned_missile in self.drone_assignment.items():
-            agent_pos = self.drones_pos[agent]
             agent_vel = self.drones_vel[agent]
             agent_accel = self.drones_acc[agent]
             if not assigned_missile:
@@ -280,6 +280,7 @@ class MissileDefenseEnv(MultiAgentEnv):
             assigned_missile_unit_vector, _ = self._calculate_missile_vectors(agent, assigned_missile)
             
             if missile_id == self.closest_missile:
+                # No weighting of rewards
                 rewards[agent] += APPROACH_VEL_REWARD * np.dot(agent_vel, assigned_missile_unit_vector)
                 rewards[agent] += APPROACH_ACC_REWARD * np.dot(agent_accel, assigned_missile_unit_vector)
             else:
@@ -287,9 +288,8 @@ class MissileDefenseEnv(MultiAgentEnv):
                 closest_missile_unit_vector, _ = self._calculate_missile_vectors(agent, self.closest_missile)
                 assigned_threat = 1.0 - np.clip(self.missiles_data[assigned_missile]["distance_to_base"] / MAX_DISTANCE_FROM_BASE, 0, 1)
                 closest_threat = 1.0 - np.clip(self.missiles_data[self.closest_missile]["distance_to_base"] / MAX_DISTANCE_FROM_BASE, 0, 1)
-                scale = 5  # Tune this
-                exp_assigned = np.exp(scale * assigned_threat)
-                exp_closest = np.exp(scale * closest_threat)
+                exp_assigned = np.exp(SOFTMAX_SCALE * assigned_threat)
+                exp_closest = np.exp(SOFTMAX_SCALE * closest_threat)
 
                 # Softmax weighting of reward for both side
                 weight_sum = exp_assigned + exp_closest
@@ -300,11 +300,6 @@ class MissileDefenseEnv(MultiAgentEnv):
                 rewards[agent] += assigned_weight * APPROACH_ACC_REWARD * np.dot(agent_accel, assigned_missile_unit_vector)
                 rewards[agent] += closest_weight * APPROACH_VEL_REWARD * np.dot(agent_vel, closest_missile_unit_vector)
                 rewards[agent] += closest_weight * APPROACH_ACC_REWARD * np.dot(agent_accel, closest_missile_unit_vector)
-                # blended_dir = assigned_weight * assigned_dir_unit + closest_weight * closest_dir_unit
-                # blended_dir /= np.linalg.norm(blended_dir) + 1e-8
-
-                # rewards[agent] += APPROACH_VEL_REWARD * np.dot(agent_vel, blended_dir)
-                # rewards[agent] += APPROACH_ACC_REWARD * np.dot(agent_accel, blended_dir)
 
         if len(self.agents) == 0:
             print("💀💀💀******No agent left, terminate******💀💀💀")
@@ -413,9 +408,6 @@ class MissileDefenseEnv(MultiAgentEnv):
 
     def _set_next_level_threshold(self):
         self.next_level_threshold = {"interceptions_needed": self.level*NUM_DRONES, "survival_steps": self.level*LEVEL_SURVIVAL_MULTIPLIER}
-        # self.survival_time = 0
-        # self.missiles_intercepted = 0
-        # Resetting seems to slow down learning
 
     def _increase_difficulty(self):  # increase the difficulty of the game as per new parameters
         global MAX_MISSILE_SPEED, MAX_MISSILE_ACCELERATION, MISSILE_COOLDOWN, NUM_MISSILES
@@ -427,7 +419,7 @@ class MissileDefenseEnv(MultiAgentEnv):
         NUM_MISSILES = int(NUM_DRONES * LEVEL_MISSILE_MULTIPLIER**self.level)
         print(f"Max Missile Acceleration: {MAX_MISSILE_ACCELERATION}")
         print(f"Max Missile Speed: {MAX_MISSILE_SPEED}")
-        print(f"Missile Number: {NUM_MISSILES}")
+        print(f"Missile Quantity: {NUM_MISSILES}")
         print(f"Missile Cooldown: {MISSILE_COOLDOWN}")
         print(f"Next level threshold: {self.next_level_threshold}")
         self.missiles = [f"missile_{i}" for i in range(NUM_MISSILES)]
@@ -470,9 +462,9 @@ class MissileDefenseEnv(MultiAgentEnv):
                 continue
             current_distance = agent_missile_distances[agent].get(current_missile, float("inf"))
             for solution in distance_heap:
-                if solution[1] != agent or (solution[1] == agent and solution[2] == current_missile):
+                best_distance, solution_agent, solution_missile = solution
+                if solution_agent != agent or (solution_agent == agent and solution_missile == current_missile):
                     continue
-                best_distance, _, best_missile = solution
                 if abs(current_distance - best_distance) > distance_threshold:
                     drones_with_better_options += 1
 
@@ -540,7 +532,6 @@ class MissileDefenseEnv(MultiAgentEnv):
             obs.extend([missile_data["distance_to_base"]])
         else:
             obs.extend([-1, -1, 0, 0, -1, 999])
-        # print(obs)
 
         # Provide data of closest missile to agent
         if self.closest_missile is not None:
@@ -552,8 +543,6 @@ class MissileDefenseEnv(MultiAgentEnv):
             obs.extend([closest_missile_data["distance_to_base"]])
         else:
             obs.extend([-1, -1, 0, 0, -1, 999])
-        # print(obs)
-        # input()
         return np.array(obs)
 
     def render(self):
@@ -624,12 +613,8 @@ if __name__ == "__main__":
     env = MissileDefenseEnv(render=False, realistic_render=True)
     while True:
         obs = env.reset()
-        print(env.drone_assignment)
         done = False
-        # actions = {"drone_0": np.array([0.1, 0.1]), "drone_1": np.array([-0.1, -0.1]), "drone_2": np.array([0.0, 0.0])}
-        # obs, rewards, terminateds, truncateds, infos = env.step(actions)
         while not done:
-            # actions = {"drone_0": np.array([0.1, 0.1]), "drone_1": np.array([-0.1, -0.1]), "drone_2": np.array([0.0, 0.0])}
             actions = {
                 "drone_0": np.array([1.0, 0.0]),
                 "drone_1": np.array([-0.0, -0.0]),
