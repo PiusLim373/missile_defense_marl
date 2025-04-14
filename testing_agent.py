@@ -25,7 +25,7 @@ config = (
 algo = PPO.from_checkpoint(checkpoint_path)
 
 # Create the environment for testing
-env = MissileDefenseEnv(render=True, realistic_render=True, test_level=3)
+env = MissileDefenseEnv(render=True, realistic_render=True, test_level=50)
 
 while True:
     # Run a test episode
@@ -33,25 +33,6 @@ while True:
     done = False
 
     while not done:
-        for event in pygame.event.get():    #Added to change missile speed, comment it out if not needed, change self.MAX_MISSILE_SPEED to MAX_MISSILE_SPEED in missile_defense_gym.py
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_UP:
-                    env.MAX_MISSILE_SPEED *= 1.1
-                    print("Increased missile speed")
-                elif event.key == pygame.K_DOWN:
-                    env.MAX_MISSILE_SPEED *= 0.9
-                    print("Decreased missile speed")
-                elif event.key == pygame.K_r:
-                    env.MAX_MISSILE_SPEED = 2.0
-                    print("Reset missile speed to default")
-                    
-                
-
-
-
-
-
-
         actions = {}
         for agent_id, obs in observations.items():
             actions[agent_id] = algo.compute_single_action(
