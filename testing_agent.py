@@ -12,7 +12,7 @@ register_env(env_name, lambda config: MissileDefenseEnv(config, render=False))
 # Define the checkpoint path (update this to your actual checkpoint location)
 pwd = os.getcwd()
 model_path = input("Enter your model path [Empty to load sample model]: \n")
-checkpoint_path = os.path.join(pwd, model_path if model_path else "sample_trained_model/checkpoint_000000")
+checkpoint_path = os.path.join(pwd, model_path if model_path else "sample_trained_model/")
 
 # Load the trained model
 config = (
