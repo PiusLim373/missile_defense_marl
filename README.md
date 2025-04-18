@@ -30,6 +30,7 @@ After the training completed, a `PPO_<date>` will be saved to the `models/` dire
 ```
 python testing_agent.py
 ```
-A sample model is provided, feel free to change it.
+The script will prompt for a model directory. If none is provided (Press Enter), it will start the testing with the sample model provided.
 
-![](/docs/sample_trained_agent_playouts.mp4)
+[![Demo Video with Sample Model](https://img.youtube.com/vi/7Z7UBZj8iI4/0.jpg)](https://youtu.be/7Z7UBZj8iI4)
+
