@@ -227,7 +227,6 @@ class MissileDefenseEnv(MultiAgentEnv):
                 print(f"💀 {agent} went out of bound at {self.drones_pos[agent]}, not providing any more observation")
                 dones[agent] = True
                 self.agents.remove(agent)
-                print(self.drone_assignment)
                 self.drone_assignment.pop(agent)
 
         # Check for drone intercepting missile, terminate
@@ -318,8 +317,9 @@ class MissileDefenseEnv(MultiAgentEnv):
         self.survival_time += 1
         self.step_counter += 1
         respawned_missiles = []
-        if (self.missiles_intercepted >= self.next_level_threshold["interceptions_needed"]
-            and self.survival_time >= self.next_level_threshold["survival_steps"]):
+        # if (self.missiles_intercepted >= self.next_level_threshold["interceptions_needed"]
+        #     and self.survival_time >= self.next_level_threshold["survival_steps"]):
+        if self.missiles_intercepted >= self.next_level_threshold["interceptions_needed"]:
             print(f"Level: {self.level}, missile intercepted: {self.missiles_intercepted}, survival time: {self.survival_time}")
             self.level += 1
             print(f"⏫ Level up to {self.level}!")
@@ -408,6 +408,7 @@ class MissileDefenseEnv(MultiAgentEnv):
 
     def _set_next_level_threshold(self):
         self.next_level_threshold = {"interceptions_needed": self.level*NUM_DRONES, "survival_steps": self.level*LEVEL_SURVIVAL_MULTIPLIER}
+        self.missiles_intercepted = 0
 
     def _increase_difficulty(self):  # increase the difficulty of the game as per new parameters
         global MAX_MISSILE_SPEED, MAX_MISSILE_ACCELERATION, MISSILE_COOLDOWN, NUM_MISSILES
