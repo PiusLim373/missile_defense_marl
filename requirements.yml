@@ -9,3 +9,4 @@ dependencies:
     - torch
     - pygame
     - ray[rllib,tune,serve]
+    - aiohttp_cors==0.7.0

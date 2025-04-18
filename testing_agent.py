@@ -3,6 +3,7 @@ from ray.rllib.algorithms.ppo import PPOConfig, PPO
 from ray.tune.registry import register_env
 from missile_defense_gym import *
 import os
+import pygame
 
 # Register the custom environment
 env_name = "missile_defense_env"
@@ -10,7 +11,8 @@ register_env(env_name, lambda config: MissileDefenseEnv(config, render=False))
 
 # Define the checkpoint path (update this to your actual checkpoint location)
 pwd = os.getcwd()
-checkpoint_path = os.path.join(pwd, "sample_trained_model/checkpoint_000000")
+model_path = input("Enter your model path [Empty to load sample model]: \n")
+checkpoint_path = os.path.join(pwd, model_path if model_path else "sample_trained_model/")
 
 # Load the trained model
 config = (
@@ -23,7 +25,7 @@ config = (
 algo = PPO.from_checkpoint(checkpoint_path)
 
 # Create the environment for testing
-env = MissileDefenseEnv(render=True, realistic_render=True)
+env = MissileDefenseEnv(render=True, realistic_render=True, test_level=50)
 
 while True:
     # Run a test episode
@@ -38,8 +40,5 @@ while True:
 
         observations, rewards, dones, truncateds, infos = env.step(actions)
         done = dones["__all__"]
-        print(f"Actions: {actions}")
-        print(f"Rewards: {rewards}")
-        print(f"Dones: {dones}")
 
 env.close()
